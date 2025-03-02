@@ -3,10 +3,12 @@
 namespace App\Models\ZalimKasaba;
 
 use App\Models\User;
-use App\Enums\ZalimKasaba\GameState;
-use App\Enums\ZalimKasaba\LobbyStatus;
 use Illuminate\Support\Str;
+use App\Enums\ZalimKasaba\GameState;
+use App\Models\ZalimKasaba\FinalVote;
+use App\Enums\ZalimKasaba\LobbyStatus;
 use Illuminate\Database\Eloquent\Model;
+use App\Enums\ZalimKasaba\FinalVoteType;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -59,6 +61,11 @@ class Lobby extends Model
     public function votes(): HasMany
     {
         return $this->hasMany(LynchVote::class);
+    }
+
+    public function finalVotes(): HasMany
+    {
+        return $this->hasMany(FinalVote::class);
     }
 
     public function accused(): BelongsTo

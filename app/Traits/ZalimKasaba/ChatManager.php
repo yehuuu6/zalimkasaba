@@ -67,6 +67,8 @@ trait ChatManager
 
         if ($this->lobby->state === GameState::DEFENSE && $this->currentPlayer->id === $this->lobby->accused_id) {
             return true;
+        } elseif ($this->lobby->state === GameState::LAST_WORDS && $this->currentPlayer->id === $this->lobby->accused_id) {
+            return true;
         }
 
         return in_array($this->lobby->state, $statesAllowedToChat);
@@ -78,10 +80,13 @@ trait ChatManager
             return;
         }
 
+        $isDead = $this->currentPlayer->is_dead;
+
         $message = ChatMessage::create([
             'lobby_id' => $this->lobby->id,
             'user_id' => Auth::id(),
             'message' => $this->message,
+            'is_dead' => $isDead,
         ]);
 
         $this->messages->push($message);

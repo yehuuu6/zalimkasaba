@@ -2,11 +2,91 @@
 
 namespace App\Traits\ZalimKasaba;
 
-use App\Enums\ZalimKasaba\LobbyStatus;
+use App\Models\ZalimKasaba\Lobby;
 use App\Models\ZalimKasaba\Player;
+use Illuminate\Support\Facades\Auth;
+use App\Enums\ZalimKasaba\LobbyStatus;
+use App\Events\ZalimKasaba\KickPlayerEvent;
 
 trait PlayerManager
 {
+    /**
+     * Initializes current player instance
+     * @return Player
+     */
+    private function initializeCurrentPlayer(): Player
+    {
+        $currentPlayer = $this->lobby->players()->updateOrCreate(
+            ['user_id' => Auth::id()],
+            [
+                'is_online' => true,
+                'last_seen' => now(),
+                'is_host' => $this->lobby->host_id === Auth::id(),
+            ],
+        );
+
+        return $currentPlayer;
+    }
+
+    public function handleKick($payload)
+    {
+        if ($payload['playerId'] === $this->currentPlayer->id) {
+            $this->currentPlayer->delete();
+            return redirect()->route('lobbies')->warning('Yönetici tarafından oyundan atıldınız.');
+        }
+
+        if (!$this->currentPlayer->is_host) return;
+
+        $this->reorderPlayerPlaces($this->lobby);
+    }
+
+    public function kickPlayer(Player $player)
+    {
+        if (!$this->currentPlayer->is_host) return;
+        broadcast(new KickPlayerEvent($this->lobby->id, $player->id));
+        if (!$player->is_online) {
+            $player->delete();
+        }
+        $this->sendSystemMessage($this->lobby, $player->user->username . ' yönetici tarafından oyundan atıldı.');
+    }
+
+    /**
+     * Reorders the player places in the lobby
+     * @param Lobby $lobby
+     */
+    private function reorderPlayerPlaces(Lobby $lobby)
+    {
+        $players = $lobby->players()->oldest()->get();
+        $place = 1;
+
+        foreach ($players as $player) {
+            if ($player->place !== $place) {
+                $player->update(['place' => $place]);
+            }
+            $place++;
+        }
+    }
+
+    /**
+     * Randomizes the place values of all players in the lobby.
+     * @return void
+     */
+    private function randomizePlayerPlaces()
+    {
+        // Get all players in the lobby
+        $players = $this->lobby->players()->get();
+
+        // Shuffle the players collection
+        $shuffledPlayers = $players->shuffle();
+
+        // Assign new place values starting from 1
+        $place = 1;
+        foreach ($shuffledPlayers as $player) {
+            $player->update(['place' => $place]);
+            $place++;
+        }
+    }
+
     private function getPlayerById(int $userId): Player | null
     {
         return $this->lobby->players()->where('user_id', $userId)->first();

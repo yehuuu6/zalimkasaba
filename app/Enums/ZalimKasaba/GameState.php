@@ -10,6 +10,7 @@ enum GameState: string
     case VOTING = 'voting';
     case DEFENSE = 'defense';
     case JUDGMENT = 'judgment';
+    case LAST_WORDS = 'last_words';
     case NIGHT = 'night';
     case REVEAL = 'reveal';
     case GAME_OVER = 'game_over';
@@ -27,7 +28,8 @@ enum GameState: string
             self::DAY => self::VOTING,
             self::VOTING => self::DEFENSE,
             self::DEFENSE => self::JUDGMENT,
-            self::JUDGMENT => self::NIGHT,
+            self::JUDGMENT => self::LAST_WORDS,
+            self::LAST_WORDS => self::NIGHT,
             self::NIGHT => self::REVEAL,
             self::REVEAL => self::DAY,
             default => self::GAME_OVER,

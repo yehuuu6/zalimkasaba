@@ -7,18 +7,16 @@ use App\Models\ZalimKasaba\Lobby;
 use App\Models\ZalimKasaba\Player;
 use App\Enums\ZalimKasaba\GameState;
 use Illuminate\Support\Facades\Auth;
-use App\Traits\ZalimKasaba\GameUtils;
 use App\Enums\ZalimKasaba\LobbyStatus;
 use App\Traits\ZalimKasaba\ChatManager;
 use App\Traits\ZalimKasaba\VoteManager;
 use App\Traits\ZalimKasaba\StateManager;
 use App\Traits\ZalimKasaba\PlayerManager;
-use App\Events\ZalimKasaba\KickPlayerEvent;
 use App\Traits\ZalimKasaba\PlayerActionsManager;
 
 class ShowLobby extends Component
 {
-    use GameUtils, StateManager, ChatManager, PlayerManager, VoteManager, PlayerActionsManager;
+    use StateManager, ChatManager, PlayerManager, VoteManager, PlayerActionsManager;
 
     public Lobby $lobby;
 
@@ -26,6 +24,8 @@ class ShowLobby extends Component
 
     public Player $currentPlayer;
     public ?Player $hostPlayer;
+
+    public bool $judgeModal;
 
     public function mount(Lobby $lobby)
     {
@@ -37,7 +37,7 @@ class ShowLobby extends Component
 
         $this->gameTitle = $this->setGameTitle($lobby);
 
-        $this->currentPlayer = $this->initializeCurrentPlayer($lobby);
+        $this->currentPlayer = $this->initializeCurrentPlayer();
 
         $this->hostPlayer = $lobby->players()->where('is_host', true)->first();
 
@@ -47,6 +47,8 @@ class ShowLobby extends Component
             $this->currentPlayer->update(['place' => $this->lobby->players()->max('place') + 1]);
             $this->sendSystemMessage($this->lobby, $this->currentPlayer->user->username . ' oyuna katıldı.');
         }
+
+        $this->setJudgeModalState();
     }
 
     private function checkHostAvailability()
@@ -54,6 +56,42 @@ class ShowLobby extends Component
         if (!$this->hostPlayer) {
             return redirect()->route('lobbies')->warning('Oyun yöneticisi aktif değil.');
         }
+    }
+
+    private function assignRoles(Lobby $lobby)
+    {
+        $players = $lobby->players;
+
+        $availableRoles = $lobby->roles->shuffle();
+
+        // Assign roles to players
+        foreach ($players as $player) {
+            $role = $availableRoles->pop();
+            $player->update([
+                'game_role_id' => $role->id,
+                'ability_uses' => $role->ability_limit,
+            ]);
+        }
+    }
+
+    /**
+     * Sets the game title based on the lobby state
+     * @return string
+     */
+    private function setGameTitle(): string
+    {
+        return match ($this->lobby->state) {
+            GameState::LOBBY => '🏟️ Lobi',
+            GameState::PREPARATION => '🎲 Hazırlık',
+            GameState::DAY => "🌞 {$this->lobby->day_count}. Gün",
+            GameState::VOTING => '🗳️ Oylama',
+            GameState::DEFENSE => '🛡️ Savunma',
+            GameState::JUDGMENT => "👨‍⚖️ Yargı ({$this->lobby->accused?->user->username})",
+            GameState::LAST_WORDS => '🗣️ Son Sözler',
+            GameState::NIGHT => "🌙 {$this->lobby->day_count}. Gece",
+            GameState::REVEAL => '🔍 Açıklama',
+            GameState::GAME_OVER => '🏁 Oyun Bitti',
+        };
     }
 
     public function getListeners()
@@ -68,30 +106,9 @@ class ShowLobby extends Component
         ];
     }
 
-    public function handleKick($payload)
-    {
-        if ($payload['playerId'] === $this->currentPlayer->id) {
-            $this->currentPlayer->delete();
-            return redirect()->route('lobbies')->warning('Yönetici tarafından oyundan atıldınız.');
-        }
-
-        if (!$this->currentPlayer->is_host) return;
-
-        $this->reorderPlayerPlaces($this->lobby);
-    }
-
-    public function kickPlayer(Player $player)
-    {
-        if (!$this->currentPlayer->is_host) return;
-        broadcast(new KickPlayerEvent($this->lobby->id, $player->id));
-        if (!$player->is_online) {
-            $player->delete();
-        }
-        $this->sendSystemMessage($this->lobby, $player->user->username . ' yönetici tarafından oyundan atıldı.');
-    }
-
     public function handleGameStateUpdated($payload)
     {
+        $this->setJudgeModalState();
         $this->gameTitle = $this->setGameTitle($this->lobby);
     }
 
@@ -101,53 +118,23 @@ class ShowLobby extends Component
             return;
         }
 
-        $this->randomizePlayerPlaces($this->lobby);
+        $this->randomizePlayerPlaces();
 
         $this->nextState();
     }
 
     public function goToNextGameState()
     {
-        $this->applyNightActionsToPlayer($this->lobby->state);
-
         if (!$this->currentPlayer->is_host) {
             return;
         }
+
+        $this->runStateExitEvents($this->lobby->state);
 
         // If lobby countdown_end is still in the future, do not proceed
         // This is a protection against front-end manipulation
         if ($this->lobby->countdown_end && $this->lobby->countdown_end->isFuture()) {
             return;
-        }
-
-        $currentState = $this->lobby->state;
-
-        switch ($currentState) {
-            case GameState::DAY:
-                if ($this->lobby->day_count === 1) {
-                    $this->nextState(GameState::NIGHT);
-                    return;
-                }
-                break;
-            case GameState::VOTING:
-                $accusedPlayerId = $this->getAccusedPlayer();
-                if (!$accusedPlayerId) {
-                    $this->sendSystemMessage($this->lobby, 'Oy birliği sağlanamadı. Oylama bitti.');
-                    $this->nextState(GameState::NIGHT);
-                    return;
-                }
-                $this->lobby->update(['accused_id' => $accusedPlayerId]);
-                break;
-            case GameState::JUDGMENT:
-                if ($this->lobby->available_trials > 0) {
-                    $this->lobby->update(['accused_id' => null]);
-                    $this->sendSystemMessage($this->lobby, 'Mahkeme karar veremedi. Yeni bir oylama başlatılıyor.');
-                    $this->nextState(GameState::VOTING);
-                    return;
-                }
-                break;
-            default:
-                break;
         }
 
         $this->nextState();

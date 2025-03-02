@@ -39,15 +39,22 @@ class DatabaseSeeder extends Seeder
         ]);
 
         $godfather = GameRole::create([
-            'icon' => '🌹',
-            'name' => 'Polat Alemdar',
+            'icon' => '⚜️',
+            'name' => 'Baron',
             'enum' => 'godfather',
         ]);
 
         $mafioso = GameRole::create([
-            'icon' => '🔫',
-            'name' => 'Memati',
+            'icon' => '💀',
+            'name' => 'Tetikçi',
             'enum' => 'mafioso',
+        ]);
+
+        $janitor = GameRole::create([
+            'icon' => '🧽',
+            'name' => 'Temizlikçi',
+            'enum' => 'janitor',
+            'ability_limit' => 3,
         ]);
 
         $doctor = GameRole::create([
@@ -62,22 +69,38 @@ class DatabaseSeeder extends Seeder
             'enum' => 'lookout',
         ]);
 
-        $hunter = GameRole::create([
-            'icon' => '🏹',
-            'name' => 'Avcı',
-            'enum' => 'hunter',
-        ]);
-
         $guard = GameRole::create([
             'icon' => '🔦',
             'name' => 'Bekçi',
             'enum' => 'guard',
         ]);
 
+        $hunter = GameRole::create([
+            'icon' => '🏹',
+            'name' => 'Avcı',
+            'enum' => 'hunter',
+            'ability_limit' => 3,
+        ]);
+
+        $witch = GameRole::create([
+            'icon' => '🔮',
+            'name' => 'Cadı',
+            'enum' => 'witch',
+            'ability_limit' => 2,
+        ]);
+
+        $angel = GameRole::create([
+            'icon' => '🌟',
+            'name' => 'Melek',
+            'enum' => 'angel',
+            'ability_limit' => 3,
+        ]);
+
         $jester = GameRole::create([
             'icon' => '🤡',
             'name' => 'Zibidi',
             'enum' => 'jester',
+            'ability_limit' => 1,
         ]);
 
         $roles = GameRole::all();

@@ -3,170 +3,242 @@
 namespace App\Traits\ZalimKasaba;
 
 use App\Models\ZalimKasaba\Player;
-use Illuminate\Support\Collection;
 use App\Enums\ZalimKasaba\GameState;
 use App\Enums\ZalimKasaba\ActionType;
 use App\Enums\ZalimKasaba\PlayerRole;
-use App\Enums\ZalimKasaba\ChatMessageType;
+use Illuminate\Support\Facades\Auth;
 
 trait PlayerActionsManager
 {
-    /**
-     * Gets killed players by fetching heal and kill actions.
-     * @param Collection $action The actions performed by players.
-     * @return array The players who are murdered during the night.
-     */
-    private function getKilledPlayers(Collection $actions): array
+    use ChatManager;
+
+    public function selectTarget(Player $targetPlayer)
     {
-        $healedPlayers = $actions->where('action_type', 'heal')
-            ->pluck('target_id')
-            ->toArray();
-
-        // Step 2: Collect killed players
-        $attackTypes = [ActionType::ORDER, ActionType::KILL, ActionType::SHOOT, ActionType::HAUNT];
-        $attackedPlayers = $actions->whereIn('action_type', $attackTypes)
-            ->pluck('target_id')
-            ->toArray();
-
-        // Return the players who are attacked but not healed (killed)
-        return array_unique(array_diff($attackedPlayers, $healedPlayers));
-    }
-
-    public function performPlayerAction(Player $targetPlayer)
-    {
-        if ($this->lobby->state !== GameState::NIGHT) {
-            return;
-        }
-
-        $wantedAction = $this->getCurrentPlayerAction();
-        $msg = $this->getActionCompleteMessage($targetPlayer);
-
-        if (!$this->currentPlayer->is_alive || $wantedAction === null) {
-            return;
-        }
+        $actionType = $this->getActionType();
 
         $existingAction = $this->lobby->actions()->where([
             'actor_id' => $this->currentPlayer->id,
-            'action_type' => $wantedAction,
+            'action_type' => $actionType,
         ])->first();
 
         if ($existingAction) {
-            $existingAction->delete();
             if ($existingAction->target_id === $targetPlayer->id) {
-                $this->sendMessageToPlayer($this->currentPlayer, "Önceki eyleminizi iptal ettiniz.");
+                $existingAction->delete();
+                $cancelMsg = $this->getCancelActionMessage($targetPlayer);
+                $this->sendMessageToPlayer($this->currentPlayer, $cancelMsg);
                 return;
             }
+
+            $existingAction->update([
+                'target_id' => $targetPlayer->id,
+                'action_type' => $actionType,
+            ]);
+        } else {
+            $this->lobby->actions()->create([
+                'actor_id' => $this->currentPlayer->id,
+                'target_id' => $targetPlayer->id,
+                'action_type' => $actionType,
+            ]);
         }
 
-        $this->lobby->actions()->create([
-            'actor_id' => $this->currentPlayer->id,
-            'target_id' => $targetPlayer->id,
-            'action_type' => $wantedAction,
-        ]);
-
-        $this->sendMessageToPlayer($this->currentPlayer, $msg);
+        $confirmMsg = $this->getActionMessage($targetPlayer);
+        $this->sendMessageToPlayer($this->currentPlayer, $confirmMsg);
     }
 
     /**
-     * Send players a message about the action they have taken.
+     * Checks if the current player can use their ability on the target player.
+     * @param Player $targetPlayer The player who is targeted by the ability.
+     * @return bool True if the player can use ability, false otherwise.
+     */
+    public function canUseAbility(Player $targetPlayer): bool
+    {
+        // Basic checks that must be checked for all roles
+        if ($this->lobby->state !== GameState::NIGHT) return false;
+        if ($this->currentPlayer->user_id !== Auth::id()) return false;
+
+        $myRole = $this->currentPlayer->role->enum;
+
+        if (!$this->currentPlayer->is_alive && $myRole !== PlayerRole::JESTER) return false;
+
+        switch ($myRole) {
+            case PlayerRole::GODFATHER:
+                if ($this->currentPlayer->id === $targetPlayer->id) return false;
+                if (in_array($targetPlayer->role->enum, PlayerRole::getMafiaRoles())) return false;
+                break;
+            case PlayerRole::MAFIOSO:
+                if ($this->currentPlayer->id === $targetPlayer->id) return false;
+                if (in_array($targetPlayer->role->enum, PlayerRole::getMafiaRoles())) return false;
+                break;
+            case PlayerRole::JANITOR:
+                if ($this->currentPlayer->id === $targetPlayer->id) return false;
+                if (in_array($targetPlayer->role->enum, PlayerRole::getMafiaRoles())) return false;
+                if ($this->currentPlayer->ability_uses === 0) return false;
+                break;
+            case PlayerRole::DOCTOR:
+                if ($targetPlayer->id === $this->currentPlayer->id && $this->currentPlayer->self_healed) return false;
+                break;
+            case PlayerRole::GUARD:
+                if ($targetPlayer->id === $this->currentPlayer->id) return false;
+                break;
+            case PlayerRole::LOOKOUT:
+                if ($targetPlayer->id === $this->currentPlayer->id) return false;
+                break;
+            case PlayerRole::HUNTER:
+                if ($targetPlayer->id === $this->currentPlayer->id) return false;
+                if ($this->currentPlayer->ability_uses === 0) return false;
+                break;
+            case PlayerRole::WITCH:
+                if ($targetPlayer->id === $this->currentPlayer->id) return false;
+                if ($this->currentPlayer->ability_uses === 0) return false;
+                break;
+            case PlayerRole::JESTER:
+                if ($targetPlayer->id === $this->currentPlayer->id) return false;
+                if ($this->currentPlayer->ability_uses === 0) return false;
+                break;
+            case PlayerRole::ANGEL:
+                if ($targetPlayer->id !== $this->currentPlayer->id) return false;
+                if ($this->currentPlayer->ability_uses === 0) return false;
+                break;
+            default:
+                return false;
+        }
+        return true;
+    }
+
+    /**
+     * Kills the target player and sets their death night.
+     * @param Player $player The player who is targeted by the ability.
+     * @param bool $canHaunt Whether the player can haunt after death. (Jester)
+     * @return void
+     */
+    private function killPlayer(Player $player, bool $canHaunt = false): void
+    {
+        $player->update([
+            'is_alive' => false,
+            'death_night' => $this->lobby->day_count,
+            'can_haunt' => $canHaunt,
+        ]);
+    }
+
+    /**
+     * Returns the action name of the player role for the button in the frontend
+     * @return string
+     */
+    public function getAbilityName(): string
+    {
+        return match ($this->currentPlayer->role->enum) {
+            PlayerRole::GODFATHER => 'Öldür',
+            PlayerRole::MAFIOSO => 'Öldür',
+            PlayerRole::JANITOR => 'Temizle',
+            PlayerRole::DOCTOR => 'Koru',
+            PlayerRole::GUARD => 'Sorgula',
+            PlayerRole::LOOKOUT => 'Dikizle',
+            PlayerRole::HUNTER => 'Vur',
+            PlayerRole::WITCH => 'Zehirle',
+            PlayerRole::JESTER => 'Lanetle',
+            PlayerRole::ANGEL => 'Koru',
+        };
+    }
+
+    /**
+     * Send target player a message about the action they have taken.
      * @param Player $targetPlayer The player who is targeted by the action.
      * @return string The message to be sent to the player.
      */
-    private function getActionCompleteMessage(Player $targetPlayer): string
+    private function getActionMessage(Player $targetPlayer): string
     {
+        $name = $targetPlayer->user->username;
+
         return match ($this->currentPlayer->role->enum) {
-            PlayerRole::GODFATHER => "{$targetPlayer->user->username} adlı oyuncuyu öldürmesi için Memati'ye emir verdin.",
-            PlayerRole::MAFIOSO => "{$targetPlayer->user->username} adlı oyuncuyu öldürme kararı aldın.",
-            PlayerRole::DOCTOR => "{$targetPlayer->user->username} adlı oyuncuyu koruma kararı aldın.",
-            PlayerRole::GUARD => "{$targetPlayer->user->username} adlı oyuncuya GBT sorgusu yapmaya karar verdin.",
-            PlayerRole::LOOKOUT => "{$targetPlayer->user->username} adlı oyuncunun evini dikizlemeye karar verdin.",
-            PlayerRole::HUNTER => "{$targetPlayer->user->username} adlı oyuncuyu vurma kararı aldın.",
-            PlayerRole::JESTER => "{$targetPlayer->user->username} adlı oyuncuyu lanetlemeye karar verdin.",
-            default => '',
+            PlayerRole::GODFATHER => "{$name} adlı oyuncunun öldürülmesi için emir verdin.",
+            PlayerRole::MAFIOSO => "{$name} adlı oyuncuyu öldürme kararı aldın.",
+            PlayerRole::JANITOR => "{$name} adlı oyuncunun kimliğini temizlemeye karar verdin.",
+            PlayerRole::DOCTOR => "{$name} adlı oyuncuyu koruma kararı aldın.",
+            PlayerRole::GUARD => "{$name} adlı oyuncuya GBT sorgusu yapmaya karar verdin.",
+            PlayerRole::LOOKOUT => "{$name} adlı oyuncunun evini dikizlemeye karar verdin.",
+            PlayerRole::HUNTER => "{$name} adlı oyuncuyu vurmaya karar verdin.",
+            PlayerRole::WITCH => "{$name} adlı oyuncuyu zehirlemeye karar verdin.",
+            PlayerRole::JESTER => "{$name} adlı oyuncuyu lanetlemeye karar verdin.",
+            PlayerRole::ANGEL => "Güzelliğini açığa çıkarmaya karar verdin."
+        };
+    }
+
+    private function sendNightAbilityMessages()
+    {
+        $players = $this->lobby->players()->get();
+
+        foreach ($players as $player) {
+            $availableUses = $player->ability_uses;
+            if ($availableUses === null) {
+                $msg = "Yeteneğinizi kullanabilirsiniz.";
+            } else {
+                if ($availableUses > 0) {
+                    $msg = match ($player->role->enum) {
+                        PlayerRole::HUNTER => "{$availableUses} adet mermin var. Birini vurabilirsin.",
+                        PlayerRole::WITCH => "{$availableUses} adet zehirin var. Birini zehirleyebilirsin.",
+                        PlayerRole::ANGEL => "{$availableUses} defa güzelliğini kullanarak kendini koruyabilirsin."
+                    };
+                } elseif ($availableUses === 0) {
+                    $msg = match ($player->role->enum) {
+                        PlayerRole::HUNTER => "Bütün mermilerini kullandın. Artık dinlenebilirsin.",
+                        PlayerRole::WITCH => "Zehirlerinin tümünü kullandın. Beklemekten başka çaren yok.",
+                        PlayerRole::ANGEL => "Güzelliğini kullanma hakkın bitti. Tamamen savunmasız durumdasın."
+                    };
+                }
+            }
+            $this->sendMessageToPlayer($player, $msg);
+        }
+    }
+
+    private function getCancelActionMessage(Player $targetPlayer): string
+    {
+        $name = $targetPlayer->user->username;
+
+        return match ($this->currentPlayer->role->enum) {
+            PlayerRole::GODFATHER => "{$name} adlı oyuncuyu öldürme emrini iptal ettin.",
+            PlayerRole::MAFIOSO => "{$name} adlı oyuncuyu öldürmemeye karar verdin.",
+            PlayerRole::JANITOR => "{$name} adlı oyuncunun kimliğini temizlemekten vaz geçtin.",
+            PlayerRole::DOCTOR => "{$name} adlı oyuncuyu korumaktan vaz geçtin.",
+            PlayerRole::GUARD => "{$name} adlı oyuncuya GBT sorgusu yapmaktan vaz geçtin.",
+            PlayerRole::LOOKOUT => "{$name} adlı oyuncunun evini dikizlemekten vaz geçtin.",
+            PlayerRole::HUNTER => "{$name} adlı oyuncuyu vurmaktan vaz geçtin.",
+            PlayerRole::WITCH => "{$name} adlı oyuncuyu zehirlemekten vaz geçtin.",
+            PlayerRole::JESTER => "{$name} adlı oyuncuyu lanetlemekten vaz geçtin.",
+            PlayerRole::ANGEL => "Güzelliğini açığa çıkarmaktan vaz geçtin."
         };
     }
 
     /**
      * Gets the action type that the current player can perform based on their role.
-     * @return ActionType|null The action type that the player can perform.
+     * @return ActionType The action type that the player can perform.
      */
-    private function getCurrentPlayerAction(): ActionType | null
+    private function getActionType(): ActionType
     {
         return match ($this->currentPlayer->role->enum) {
             PlayerRole::GODFATHER => ActionType::ORDER,
             PlayerRole::MAFIOSO => ActionType::KILL,
+            PlayerRole::JANITOR => ActionType::CLEAN,
             PlayerRole::DOCTOR => ActionType::HEAL,
             PlayerRole::GUARD => ActionType::INTERROGATE,
             PlayerRole::LOOKOUT => ActionType::WATCH,
             PlayerRole::HUNTER => ActionType::SHOOT,
+            PlayerRole::ANGEL => ActionType::REVEAL,
+            PlayerRole::WITCH => ActionType::POISON,
             PlayerRole::JESTER => ActionType::HAUNT,
-            default => null,
+            PlayerRole::ANGEL => ActionType::REVEAL,
         };
     }
 
     /**
-     * Checks if the current player has performed an action on the target player.
-     * @param Player $targetPlayer The player who is targeted by the action.
-     * @return bool True if the player has performed an action, false otherwise.
+     * Checks if the current player has used their ability on the target player.
+     * @param Player $targetPlayer The player who is targeted by the ability.
+     * @return bool True if the player has used ability, false otherwise.
      */
-    public function hasPerformedAction(Player $targetPlayer): bool
+    public function hasUsedAbility(Player $targetPlayer): bool
     {
         return $this->lobby->actions()->where([
             'actor_id' => $this->currentPlayer->id,
             'target_id' => $targetPlayer->id,
         ])->exists();
-    }
-
-    /**
-     * Applies night actions to the players based on the current game state.
-     * @param GameState $currentState The current state of the game.
-     * @return void
-     */
-    private function applyNightActionsToPlayer(GameState $currentState)
-    {
-        // Ensure it’s night phase and only the host processes
-        if ($currentState !== GameState::NIGHT) return;
-        if (!$this->currentPlayer->is_host) return;
-
-        // Fetch all actions and players once for efficiency
-        $actions = $this->lobby->actions()->get();
-        $players = $this->lobby->players()->get()->keyBy('id');
-
-        // Process each player’s night actions
-        foreach ($players as $player) {
-            // Check ability usage for living players with roles
-            if ($player->is_alive) {
-                $playerActions = $actions->where('actor_id', $player->id);
-                if ($playerActions->count() === 0) {
-                    $this->sendMessageToPlayer($player, 'Gece yeteneğinizi kullanmadınız.');
-                }
-            }
-
-            // Check actions targeting this player
-            $healActions = $actions->where('target_id', $player->id)
-                ->where('action_type', ActionType::HEAL);
-            $attackActions = $actions->whereIn('action_type', [ActionType::ORDER, ActionType::KILL, ActionType::SHOOT, ActionType::HAUNT])
-                ->where('target_id', $player->id);
-
-            $wasHealed = $healActions->count() > 0;
-            $wasAttacked = $attackActions->count() > 0;
-
-            if ($wasAttacked) {
-                if ($wasHealed) {
-                    // Player was attacked but healed
-                    $healAction = $healActions->first();
-                    $healer = $players->get($healAction->actor_id);
-                    $attackAction = $attackActions->first();
-                    $attacker = $players->get($attackAction->actor_id);
-
-                    $this->sendMessageToPlayer($attacker, 'Hedefinize saldırdınız, ancak biri onu geri hayata döndürdü!', ChatMessageType::WARNING);
-                    $this->sendMessageToPlayer($healer, 'Hedefiniz saldırıya uğradı, ancak onu kurtardınız!', ChatMessageType::SUCCESS);
-                    $this->sendMessageToPlayer($player, 'Biri evine girip sana saldırdı, ama bir doktor seni kurtardı!', ChatMessageType::SUCCESS);
-                } else {
-                    // Player was attacked and not healed
-                    $this->sendMessageToPlayer($player, 'Biri evinize girdi, öldürüldünüz!', ChatMessageType::WARNING);
-                }
-            }
-        }
     }
 }

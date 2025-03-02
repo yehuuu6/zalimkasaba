@@ -16,7 +16,7 @@
             },
             removeRole(uuid) {
                 this.selectedRoles = this.selectedRoles.filter(role => role.uuid !== uuid);
-            }
+            },
         }" class="flex gap-4 w-full">
             <div class="w-1/2">
                 <h1 class="text-xl font-bold text-gray-700">
@@ -26,7 +26,7 @@
                     <template x-for="role in selectedRoles" :key="index">
                         <button type="button" x-on:click="removeRole(role.uuid)"
                             class="bg-white hover:bg-gray-50 font-medium w-full text-gray-800 px-4 py-2 rounded">
-                            <span x-text="role.name"></span>
+                            <span x-text="role.icon + ' ' + role.name"></span>
                         </button>
                     </template>
                 </div>
@@ -42,6 +42,19 @@
                             class="bg-white flex items-center gap-1 font-medium w-full hover:bg-gray-50 text-gray-800 px-4 py-2 rounded">
                             {{ $role->icon }}
                             {{ $role->name }}
+                            <span class="text-sm font-bold"
+                                :class="{
+                                    'text-red-600': '{{ $role->enum->getFaction() }}' ==
+                                        'Mafya 🌹',
+                                    'text-green-600': '{{ $role->enum->getFaction() }}' ==
+                                        'Kasaba 🏘️',
+                                    'text-purple-500': '{{ $role->enum->getFaction() }}' ==
+                                        'Kaos 🌀',
+                                    'text-gray-500': '{{ $role->enum->getFaction() }}' ==
+                                        'Tarafsız 🕊️'
+                                }">
+                                ({{ $role->enum->getFaction() }})
+                            </span>
                         </button>
                     @empty
                         <h1>

@@ -56,34 +56,59 @@
                 <div class="bg-white rounded shadow-sm flex flex-col p-1 h-full">
                     <h1 class="text-2xl text-gray-800 font-semibold p-5 pb-0">Roller</h1>
                     <ul class="flex flex-col gap-2 mt-1.5 flex-grow overflow-y-auto h-0 px-5 pb-5 pt-0">
-                        @forelse ($lobby->roles as $role)
-                            <li class="flex items-center p-2 gap-2 rounded" wire:key="lobby-role-{{ $role->id }}">
+                        @foreach ($lobby->roles as $role)
+                            <li class="flex items-center p-2 gap-1 rounded" wire:key="lobby-role-{{ $role->id }}">
                                 {{ $role->icon }}
                                 <span class="text-gray-800 font-semibold">
                                     {{ $role->name }}
                                 </span>
-                            </li>
-                        @empty
-                            <li class="flex items-center gap-2 p-2 rounded">
-                                <span class="text-gray-800 font-semibold">
-                                    Odada belirlenen roller yok.
+                                <span class="text-sm font-bold"
+                                    :class="{
+                                        'text-red-600': '{{ $role->enum->getFaction() }}' ==
+                                            'Mafya 🌹',
+                                        'text-green-600': '{{ $role->enum->getFaction() }}' ==
+                                            'Kasaba 🏘️',
+                                        'text-purple-500': '{{ $role->enum->getFaction() }}' ==
+                                            'Kaos 🌀',
+                                        'text-gray-500': '{{ $role->enum->getFaction() }}' ==
+                                            'Tarafsız 🕊️'
+                                    }">
+                                    ({{ $role->enum->getFaction() }})
                                 </span>
                             </li>
-                        @endforelse
+                        @endforeach
                     </ul>
                 </div>
             </div>
         </div>
-        <div class="flex flex-col flex-grow gap-5 h-full">
-            <div class="flex bg-white rounded shadow-sm items-center justify-between p-6">
-                <span class="text-gray-800 font-bold text-2xl">
-                    {{ $gameTitle }}
+        <div class="flex flex-col flex-grow gap-5 h-full relative">
+            <div class="flex bg-white rounded shadow-sm items-center justify-between p-6" x-ref="gameHeader">
+                <span class="text-gray-800 font-bold text-2xl" wire:text="gameTitle">
                 </span>
                 <livewire:show-game-timer :$lobby />
             </div>
+            <div x-anchor.bottom-center.offset.15="$refs.gameHeader" wire:show="judgeModal" wire:cloak wire:transition
+                class="shadow-sm rounded w-2/3 uppercase justify-between p-6 bg-white text-gray-600">
+                <h1 class="text-center font-bold w-full text-lg text-gray-700">
+                    Kasaba <span class="text-blue-400">{{ $lobby->accused?->user->username }}</span> adlı sanığın
+                    kaderini belirliyor.
+                </h1>
+                <div class="flex items-center gap-4 justify-evenly p-4 mt-2">
+                    <button type="button" wire:click="finalVote('guilty')"
+                        :class="{ 'outline outline-4 outline-red-300 shadow-lg shadow-red-400': {{ $this->hasVotedGuilty() }} }"
+                        class="bg-red-500 hover:bg-red-600 uppercase text-white rounded font-bold shadow px-4 py-2 transition duration-200 ease-out active:scale-90">
+                        Suçlu
+                    </button>
+                    <button type="button" wire:click="finalVote('innocent')"
+                        :class="{ 'outline outline-4 outline-green-300 shadow-lg shadow-green-400': {{ $this->hasVotedInno() }} }"
+                        class="bg-green-500 hover:bg-green-600 uppercase text-white rounded font-bold shadow px-4 py-2 transition duration-200 ease-out active:scale-90">
+                        Masum
+                    </button>
+                </div>
+            </div>
             <livewire:chat-window :$lobby :$currentPlayer />
         </div>
-        <div class="flex flex-col gap-5 w-72 h-full flex-shrink-0">
+        <div class="flex flex-col gap-5 w-80 h-full flex-shrink-0">
             @if ($this->lobby->state !== App\Enums\ZalimKasaba\GameState::LOBBY && $this->currentPlayer->role)
                 <div x-data="{
                     isExpanded: true,
@@ -101,39 +126,50 @@
                             —
                         </button>
                     </h1>
-                    <div x-show="isExpanded" class="mt-5">
+                    <div x-show="isExpanded" x-collapse class="mt-2">
                         <x-seperator />
                         <p class="mt-2">
                             <span class="font-medium text-gray-700 text-sm">Grup:</span>
-                            <span class="text-sm"
+                            <span class="text-sm font-bold"
                                 :class="{
-                                    'text-red-600': '{{ $this->currentPlayer->role->enum->getFaction() }}' == 'Mafya',
+                                    'text-red-600': '{{ $this->currentPlayer->role->enum->getFaction() }}' ==
+                                        'Mafya 🌹',
                                     'text-green-600': '{{ $this->currentPlayer->role->enum->getFaction() }}' ==
-                                        'Kasaba',
+                                        'Kasaba 🏘️',
+                                    'text-purple-500': '{{ $this->currentPlayer->role->enum->getFaction() }}' ==
+                                        'Kaos 🌀',
+                                    'text-gray-500': '{{ $this->currentPlayer->role->enum->getFaction() }}' ==
+                                        'Tarafsız 🕊️'
                                 }">
                                 {{ $this->currentPlayer->role->enum->getFaction() }}
                             </span>
                         </p>
-                        <div class="mt-1">
-                            <h4 class="font-medium text-gray-700 text-sm">
+                        <p>
+                            <span class="font-medium text-gray-700 text-sm">
                                 Amaç:
-                            </h4>
+                            </span>
                             <span class="text-gray-500 text-xs">
                                 {{ $this->currentPlayer->role->enum->getGoal() }}
                             </span>
-                        </div>
-                        <div class="mt-1">
-                            <h4 class="font-medium text-gray-700 text-sm">Yetenek:</h4>
+                        </p>
+                        <p>
+                            <span class="font-medium text-gray-700 text-sm">Yetenek:</span>
                             <span class="text-gray-500 text-xs">
                                 {{ $this->currentPlayer->role->enum->getDescription() }}
                             </span>
-                        </div>
+                        </p>
                     </div>
                 </div>
             @endif
             <div class="flex rounded shadow-sm flex-col flex-grow flex-shrink-0 bg-white p-6">
                 <div class="flex items-center justify-between">
-                    <h1 class="text-2xl text-gray-800 font-semibold">Oyuncular</h1>
+                    <h1 class="text-2xl text-gray-800 font-semibold">
+                        @if ($lobby->state === App\Enums\ZalimKasaba\GameState::LOBBY)
+                            Oyuncular
+                        @else
+                            Kasabalılar
+                        @endif
+                    </h1>
                     <span class="text-gray-500 text-sm font-medium">
                         {{ $lobby->players->count() }} / {{ $lobby->max_players }}
                     </span>
@@ -142,7 +178,7 @@
                     @forelse ($lobby->players()->orderBy('place')->where('is_alive', true)->get() as $player)
                         <li wire:key="player-{{ $player->id }}"
                             class="flex items-center justify-between gap-4 rounded-lg transition-colors">
-                            <div class="flex items-center gap-2">
+                            <div class="flex items-center gap-1">
                                 <span
                                     :class="{
                                         'bg-green-500': {{ $player->is_online }},
@@ -158,8 +194,14 @@
                                     }">
                                     {{ $player->user->username }}
                                 </span>
-                                @if ($player->is_host)
+                                @if ($player->is_host && $lobby->state === App\Enums\ZalimKasaba\GameState::LOBBY)
                                     👑
+                                @endif
+                                @if (
+                                    $lobby->state !== App\Enums\ZalimKasaba\GameState::LOBBY &&
+                                        in_array($player->role->enum, App\Enums\ZalimKasaba\PlayerRole::getMafiaRoles()) &&
+                                        in_array($currentPlayer->role->enum, App\Enums\ZalimKasaba\PlayerRole::getMafiaRoles()))
+                                    🌹
                                 @endif
                                 @if ($lobby->state === App\Enums\ZalimKasaba\GameState::VOTING)
                                     <span class="text-gray-500 text-xs">
@@ -184,18 +226,13 @@
                                         OY VER
                                     @endif
                                 </button>
-                            @elseif (
-                                $lobby->state === App\Enums\ZalimKasaba\GameState::NIGHT &&
-                                    $this->currentPlayer->is_alive &&
-                                    $this->getPlayerActionName($currentPlayer) !== null &&
-                                    $currentPlayer->user_id === Auth::id() &&
-                                    $currentPlayer->id !== $player->id)
-                                <button type="button" wire:click="performPlayerAction({{ $player->id }})"
+                            @elseif ($this->canUseAbility($player))
+                                <button type="button" wire:click="selectTarget({{ $player->id }})"
                                     class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-2 py-1 text-xs rounded">
-                                    @if ($this->hasPerformedAction($player))
+                                    @if ($this->hasUsedAbility($player))
                                         İPTAL
                                     @else
-                                        {{ $this->getPlayerActionName($currentPlayer) }}
+                                        {{ $this->getAbilityName() }}
                                     @endif
                                 </button>
                             @endif

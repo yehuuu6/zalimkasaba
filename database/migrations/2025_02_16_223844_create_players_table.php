@@ -24,7 +24,9 @@ return new class extends Migration
             $table->boolean('is_alive')->default(true);
             $table->integer('death_night')->nullable();
             $table->boolean('self_healed')->default(false);
+            $table->boolean('is_cleaned')->default(false);
             $table->boolean('can_haunt')->default(false);
+            $table->integer('ability_uses')->nullable();
             $table->foreignId('game_role_id')->nullable()->constrained('game_roles')->nullOnDelete();
             $table->timestamps();
         });

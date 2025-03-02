@@ -7,7 +7,7 @@ use App\Events\ZalimKasaba\GameStateUpdated;
 
 trait StateManager
 {
-    use StateEvents;
+    use StateEnterEvents, StateExitEvents;
 
     /**
      * Changes the state of the lobby to the next state.
@@ -21,32 +21,23 @@ trait StateManager
         // Determine the next state: use override if provided, otherwise use default next state
         $nextState = $override ?? $this->lobby->state->next();
 
-        $currentDate = $this->lobby->day_count;
+        $currentDay = $this->lobby->day_count;
 
         if ($nextState->value === GameState::DAY->value) {
-            $this->lobby->update(['day_count' => $currentDate + 1]);
+            $this->lobby->update(['day_count' => $currentDay + 1]);
         }
 
         $this->lobby->update(['state' => $nextState]);
 
         // In seconds
-        $oldTimerValues = [
-            GameState::PREPARATION->value => 15,
-            GameState::DAY->value => 90,
-            GameState::VOTING->value => 30,
-            GameState::DEFENSE->value => 30,
-            GameState::JUDGMENT->value => 15,
-            GameState::NIGHT->value => 60,
-            GameState::REVEAL->value => 10,
-        ];
-
         $timerValues = [
-            GameState::PREPARATION->value => 15,
-            GameState::DAY->value => 15,
-            GameState::VOTING->value => 5,
-            GameState::DEFENSE->value => 20,
+            GameState::PREPARATION->value => 5,
+            GameState::DAY->value => 5,
+            GameState::VOTING->value => 15,
+            GameState::DEFENSE->value => 2,
             GameState::JUDGMENT->value => 15,
-            GameState::NIGHT->value => 35,
+            GameState::LAST_WORDS->value => 10,
+            GameState::NIGHT->value => 10,
             GameState::REVEAL->value => 5,
         ];
 
@@ -55,27 +46,48 @@ trait StateManager
             $this->lobby->update(['countdown_start' => now(), 'countdown_end' => now()->addSeconds($timerValues[$nextState->value])]);
         }
 
-        $this->runStateEvents($nextState);
+        $this->runStateEnterEvents($nextState);
 
         // Broadcast the updated state to all users in the lobby.
         broadcast(new GameStateUpdated($this->lobby->id, $nextState));
     }
 
     /**
-     * Execute events when the given state is entered.
-     * @param GameState $state
+     * Execute events before the next state is entered.
+     * @param GameState $currentState
      * @return void
      */
-    private function runStateEvents(GameState $state): void
+    private function runStateExitEvents(GameState $currentState): void
     {
-        match ($state) {
-            GameState::DAY => $this->dayStateEvents(),
-            GameState::VOTING => $this->voteStateEvents(),
-            GameState::DEFENSE => $this->defenseStateEvents(),
-            GameState::JUDGMENT => $this->judgmentStateEvents(),
-            GameState::NIGHT => $this->nightStateEvents(),
-            GameState::REVEAL => $this->revealStateEvents(),
-            GameState::PREPARATION => $this->preparationStateEvents(),
+        match ($currentState) {
+            GameState::LOBBY => $this->exitLobby(),
+            GameState::DAY => $this->exitDay(),
+            GameState::VOTING => $this->exitVoting(),
+            GameState::DEFENSE => $this->exitDefense(),
+            GameState::JUDGMENT => $this->exitJudgment(),
+            GameState::LAST_WORDS => $this->exitLastWords(),
+            GameState::NIGHT => $this->exitNight(),
+            GameState::REVEAL => $this->exitReveal(),
+            GameState::PREPARATION => $this->exitPreparation(),
+        };
+    }
+
+    /**
+     * Execute events when the given state is entered.
+     * @param GameState $nextState
+     * @return void
+     */
+    private function runStateEnterEvents(GameState $nextState): void
+    {
+        match ($nextState) {
+            GameState::DAY => $this->enterDay(),
+            GameState::VOTING => $this->enterVoting(),
+            GameState::DEFENSE => $this->enterDefense(),
+            GameState::JUDGMENT => $this->enterJudgment(),
+            GameState::LAST_WORDS => $this->enterLastWords(),
+            GameState::NIGHT => $this->enterNight(),
+            GameState::REVEAL => $this->enterReveal(),
+            GameState::PREPARATION => $this->enterPreparation(),
         };
     }
 }
